@@ -1,0 +1,29 @@
+{
+  "temporal_decay": {
+    "scope_overclaim":      0.50,
+    "statistical_weakness": 0.20,
+    "methodology_gap":      0.02,
+    "default":              0.10
+  },
+  "routing": {
+    "tau_high":  0.60,
+    "tau_low":   0.25,
+    "delta":     0.35,
+    "min_trust": 0.40
+  },
+  "encoders": {
+    "model_name":   "allenai/scibert_scivocab_uncased",
+    "embed_dim":    8,
+    "concept_dim":  8,
+    "max_length":   512
+  },
+  "lora": {
+    "rank":  4,
+    "scale": 0.01
+  },
+  "experiment": {
+    "min_review_score_accept": 6,
+    "max_review_score_reject": 4,
+    "min_events_per_cluster":  4
+  }
+}
