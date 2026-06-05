@@ -150,4 +150,4 @@ The same mathematical spine — TV/√G divergence, temporal trust gate, System 
 
 ## License
 
-Apache 2.0. Developed by Aadithya Vishnu Sajeev ([ORCID: 0009-0009-3916-0988](https://orcid.org/0009-0009-3916-0988)) under the Snath AI Open Source Research Initiative. Developed on personal hardware, outside employment.
+Released under the [Apache 2.0 License](LICENSE). See `LICENSE` for terms.
