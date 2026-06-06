@@ -102,13 +102,14 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         # The 8 dimensions are learned (not named), but they represent the
         # encoder's internal "concept axes" for claim quality. LoRA adapters
         # then shift the projection for known failure patterns.
-        self.proj = nn.Sequential(
-            nn.Linear(768, embed_dim, bias=True),
-            nn.LayerNorm(embed_dim),
-        )
-        # Xavier init: appropriate for 768→8 projection
-        nn.init.xavier_uniform_(self.proj[0].weight)
-        nn.init.zeros_(self.proj[0].bias)
+        # Raw linear projection — no LayerNorm.
+        # LayerNorm inside proj forces each sample to unit within-sample variance,
+        # which trivially zeroes the batch off-diagonal covariance SIGReg needs to
+        # optimise. std=0.1 init gives z_i ~ N(0, ~0.8) so softmax is peaked enough
+        # for routing confidence > tau_low while leaving real variance for SIGReg.
+        self.proj = nn.Linear(768, embed_dim, bias=True)
+        nn.init.normal_(self.proj.weight, mean=0.0, std=0.1)
+        nn.init.zeros_(self.proj.bias)
         self.proj.to(self.device)
 
     def _load_backbone(self):
@@ -194,7 +195,7 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         A = payload["A"].to(self.device)   # (embed_dim, rank)
         B = payload["B"].to(self.device)   # (rank, embed_dim)
         with torch.no_grad():
-            self.proj[0].weight.data += (A @ B)
+            self.proj.weight.data += (A @ B)
 
     # ------------------------------------------------------------------
     # SIGReg projection fine-tuning (AIA Experiment 3)

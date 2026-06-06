@@ -88,12 +88,9 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
         # See AbstractClaimsEncoder for full rationale.
         # Separate instance from AbstractClaimsEncoder — V1 independence.
         # LoRA for the evidence stream is injected here only.
-        self.proj = nn.Sequential(
-            nn.Linear(768, embed_dim, bias=True),
-            nn.LayerNorm(embed_dim),
-        )
-        nn.init.xavier_uniform_(self.proj[0].weight)
-        nn.init.zeros_(self.proj[0].bias)
+        self.proj = nn.Linear(768, embed_dim, bias=True)
+        nn.init.normal_(self.proj.weight, mean=0.0, std=0.1)
+        nn.init.zeros_(self.proj.bias)
         self.proj.to(self.device)
 
     def _load_backbone(self):
@@ -185,7 +182,7 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
         A = payload["A"].to(self.device)
         B = payload["B"].to(self.device)
         with torch.no_grad():
-            self.proj[0].weight.data += (A @ B)
+            self.proj.weight.data += (A @ B)
 
     # ------------------------------------------------------------------
     # SIGReg projection fine-tuning (AIA Experiment 3)
