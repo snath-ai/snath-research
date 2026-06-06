@@ -3,7 +3,7 @@
 # Snath Research
 ### Multi-Stream Divergence Routing for Scientific Claim Verification
 
-**The fifth domain instantiation of the Lár-JEPA cognitive routing architecture.**
+**The fourth domain instantiation of the Lár-JEPA cognitive routing architecture.**
 
 <p align="center">
   <a href="https://github.com/snath-ai/Lar-JEPA">
@@ -124,16 +124,16 @@ The experiment reports AUROC before and after adapter injection, measured agains
 
 ## Domain Isomorphism
 
-The routing code in this repository — `DivergenceRouter`, `DHardQueue`, `ResearchDMN`, `ResearchAdapterRouter` — is structurally identical to the four prior Snath instantiations. Only the encoder constructors, failure-class labels, and λ constants differ.
+The routing code in this repository — `DivergenceRouter`, `DHardQueue`, `ResearchDMN`, `ResearchAdapterRouter` — is structurally identical to the three other Snath instantiations. Only the encoder constructors, failure-class labels, and λ constants differ.
 
-| Domain | Stream A | Stream B | Ground truth |
-|---|---|---|---|
-| [Snath Basis](https://github.com/snath-ai/snath-basis) | Fundamental analysis | Market signals | Realised returns |
-| [Snath Aviation](https://github.com/snath-ai/snath-aviation) | Radar altimeter | Pitot tube | Flight outcome |
-| [Snath Robotics](https://github.com/snath-ai/snath-robotics) | Vision | Proprioception | Sensor ground truth |
-| **Snath Research** ← you are here | Paper claims | Peer reviews | OpenReview decisions |
+| Repo | Domain | Stream A | Stream B | Failure class |
+|---|---|---|---|---|
+| [Snath Basis](https://github.com/snath-ai/snath-basis) | Quantitative finance | Fundamental analysis | Market signals | `market_regime` / `structural` |
+| [Snath Aviation](https://github.com/snath-ai/snath-aviation) | Aviation sensor routing | Radar | Pitot tube | `weather_induced` / `hardware_struct` |
+| [Snath Robotics](https://github.com/snath-ai/snath-robotics) | Humanoid sensor routing | Vision | Proprioception | `environmental_transient` / `hardware_structural` |
+| **Snath Research** ← you are here | Scientific claim verification | Paper claims | Peer reviews | `scope_overclaim` / `methodology_gap` |
 
-The same mathematical spine — TV/√G divergence, temporal trust gate, System 1/2 asymmetry, HMAC-signed adapter chain — governs scientific publishing, financial markets, aviation safety, humanoid robotics, and drug discovery without modification to any routing primitive.
+The same mathematical spine — TV/√G divergence, temporal trust gate, System 1/2 asymmetry, HMAC-signed adapter chain — governs scientific publishing, financial markets, aviation safety, and humanoid robotics without modification to any routing primitive.
 
 ---
 
