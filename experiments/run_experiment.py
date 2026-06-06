@@ -472,66 +472,50 @@ def run(args):
 
     # ── 7. Re-run with adapters injected (AFTER) ──────────────────────────
     log.info(f"\nRe-running router with adapters...")
-    adapter_router = ResearchAdapterRouter(adapter_dir="models/adapters")
-    log.info(f"Adapters available: {adapter_router.available()}")
 
-    # Re-run with adapters.
-    # Correct order: (1) apply adapter router → may inject LoRA into an encoder,
-    # (2) RE-ENCODE using the now-modified encoder, (3) compute new D.
-    # Using pre-computed z vectors for step (3) would ignore the LoRA change.
+    # Inject all built adapters into encoders ONCE before re-encoding.
+    # The old per-paper approach (adapter_router.resolve() in a loop) had two
+    # bugs: (1) tau_sim=0.90 centroid match almost never fires in 8-dim space,
+    # so load_lora() was never called; (2) even if it fired for paper i, papers
+    # i+1..N computed z_orig with the already-modified encoder, making
+    # z_new == z_orig and D_new == D_orig for those papers.
+    # Correct measurement: inject once, then re-encode all 322 papers cleanly.
+    from pathlib import Path as _Path
+    for meta in built:
+        pt_path = meta.get("pt_path", "")
+        if not pt_path or not _Path(pt_path).exists():
+            continue
+        _payload = torch.load(pt_path, map_location="cpu", weights_only=False)
+        target   = _payload.get("target_encoder", "")
+        if target == "claims":
+            enc_claims.load_lora(pt_path)
+            log.info(f"  LoRA → enc_claims  ({meta['failure_class']}, "
+                     f"W≈1.0, n={meta['n_events']})")
+        elif target == "reviews":
+            enc_reviews.load_lora(pt_path)
+            log.info(f"  LoRA → enc_reviews ({meta['failure_class']}, "
+                     f"W≈1.0, n={meta['n_events']})")
+
+    # Re-encode every paper with the now-adapted encoder(s).
     d_scores_after = []
     for r in paper_results:
-        paper = next((p for p in papers if p.paper_id == r["paper_id"]), None)
-        if paper is None:
-            d_scores_after.append(r["divergence"])
-            continue
-
-        # Use original z for System 1 centroid matching (no re-encode needed)
-        c_raw = bert_cache_claims.get(paper.paper_id)
-        rv_raw = bert_cache_reviews.get(paper.paper_id)
+        c_raw  = bert_cache_claims.get(r["paper_id"])
+        rv_raw = bert_cache_reviews.get(r["paper_id"])
         if c_raw is None:
             d_scores_after.append(r["divergence"])
             continue
-
-        cache_is_8dim = c_raw.shape[-1] == enc_claims.embed_dim
         try:
-            if cache_is_8dim:
-                z_claims_orig  = c_raw.float()
-                z_reviews_orig = rv_raw.float()
+            if c_raw.shape[-1] == enc_claims.embed_dim:
+                # Smoke-test path: already concept-dim, use as-is
+                result_after = router.route(c_raw.float(), rv_raw.float())
             else:
                 with torch.no_grad():
-                    z_claims_orig  = enc_claims.forward(c_raw.unsqueeze(0)).squeeze(0)
-                    z_reviews_orig = enc_reviews.forward(rv_raw.unsqueeze(0)).squeeze(0)
-
-            # Apply adapter router — may inject LoRA into the faulty encoder
-            base_dec = RouteDecision(r["decision"])
-            _final_dec, _note = adapter_router.resolve(
-                z_claims=z_claims_orig.numpy(),
-                z_reviews=z_reviews_orig.numpy(),
-                base_decision=base_dec,
-                conf_claims=0.7,
-                conf_reviews=0.7,
-                enc_claims=enc_claims,
-                enc_reviews=enc_reviews,
-            )
-
-            # Re-encode AFTER potential LoRA injection to see the actual effect
-            if cache_is_8dim:
-                # 8-dim smoke test: adapters shift projection weights, but since
-                # concept vectors bypass the projection, re-route with originals
-                result_after = router.route(z_claims_orig, z_reviews_orig,
-                                            paper_id=r["paper_id"], venue="")
-            else:
-                with torch.no_grad():
-                    z_claims_new  = enc_claims.forward(c_raw.unsqueeze(0)).squeeze(0)
-                    z_reviews_new = enc_reviews.forward(rv_raw.unsqueeze(0)).squeeze(0)
-                result_after = router.route(z_claims_new, z_reviews_new,
-                                            paper_id=r["paper_id"], venue="")
-
+                    z_c = enc_claims.forward(c_raw.unsqueeze(0)).squeeze(0)
+                    z_r = enc_reviews.forward(rv_raw.unsqueeze(0)).squeeze(0)
+                result_after = router.route(z_c, z_r)
             d_scores_after.append(result_after.divergence)
         except Exception:
             d_scores_after.append(r["divergence"])
-            continue
 
     auroc_after = compute_auroc(d_scores_after, labels)
 
