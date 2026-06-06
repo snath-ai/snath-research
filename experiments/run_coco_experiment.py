@@ -771,16 +771,18 @@ def run_full_experiment(
     )
 
     # ── Apply adapters + final AUROC ──────────────────────────────────────────
+    # DMN writes target_encoder="claims" (=Stream A=enc_img) or "reviews" (=Stream B=enc_cap)
+    # because we passed z_img as v_claims and z_cap as v_reviews when logging D_hard events.
     from pathlib import Path as _Path
     for meta in built:
         pt_path = meta.get("pt_path", "")
         if not pt_path or not _Path(pt_path).exists():
             continue
         target = meta.get("target_encoder", "")
-        if target == "image":
+        if target == "claims":
             enc_img.load_lora(pt_path)
             log.info(f"  LoRA → enc_img  ({meta['failure_class']}, n={meta['n_events']})")
-        elif target == "caption":
+        elif target == "reviews":
             enc_cap.load_lora(pt_path)
             log.info(f"  LoRA → enc_cap  ({meta['failure_class']}, n={meta['n_events']})")
 
