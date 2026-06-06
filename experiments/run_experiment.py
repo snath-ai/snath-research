@@ -304,14 +304,21 @@ def run(args):
         _n_comp = min(enc_claims.embed_dim, len(_valid_pca) - 1)
         _pca = _PCA(n_components=_n_comp)
         _pca.fit(_diffs)
-        _components = torch.tensor(_pca.components_, dtype=torch.float32)  # (8, 768)
+        # PCA components are unit vectors; inputs are L2-normalised so each
+        # z_i = cos(θ) ∈ [-1, 1]. Those tiny values → flat softmax → confidence
+        # never crosses tau_low → TRIGGER_REPLAN = 0%.
+        # Scale = 7 puts moderate-disagreement papers (|cos θ| ≈ 0.2) at
+        # z_max ≈ 1.4 → softmax_max ≈ 0.37 → confidence ≈ 0.28 > tau_low. ✓
+        _ROUTING_SCALE = 7.0
+        _components = torch.tensor(_pca.components_, dtype=torch.float32) * _ROUTING_SCALE
         with torch.no_grad():
             enc_claims.proj.weight.data  = _components.clone()
             enc_claims.proj.bias.data.zero_()
             enc_reviews.proj.weight.data = _components.clone()
             enc_reviews.proj.bias.data.zero_()
         log.info(f"\nPCA projection init ({_n_comp} components, "
-                 f"explained_var={_pca.explained_variance_ratio_.sum():.3f})")
+                 f"explained_var={_pca.explained_variance_ratio_.sum():.3f}, "
+                 f"routing_scale={_ROUTING_SCALE})")
 
     # ── 2c. Projection fine-tuning with SIGReg (--train-projection) ──────
     #
