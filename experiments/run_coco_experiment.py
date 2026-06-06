@@ -480,17 +480,22 @@ def mine_dhard_and_consolidate(
 
     Returns list of adapter metadata dicts (same as ResearchDMN.consolidate()).
     """
-    from dhard import DHardQueue, ResearchDHardEvent
+    import datetime as _dt
 
     adapter_dir.mkdir(parents=True, exist_ok=True)
+    # Start fresh queue for this run
+    if dhard_path.exists():
+        dhard_path.unlink()
     queue = DHardQueue(str(dhard_path))
 
     enc_img.eval()
     enc_cap.eval()
 
+    verdicts: dict = {}
     n_dhard = 0
+
     with torch.no_grad():
-        for i, (label) in enumerate(oracle_labels):
+        for i, label in enumerate(oracle_labels):
             x_img = img_embs[i].unsqueeze(0).to(enc_img.device)
             x_cap = cap_embs[i].unsqueeze(0).to(enc_cap.device)
             z_img = enc_img(x_img).squeeze(0)
@@ -502,23 +507,33 @@ def mine_dhard_and_consolidate(
             if not is_hard:
                 continue
 
-            # Winner: label=1 (matched) → caption claim was correct → winner="caption"
-            #         label=0 (mismatched) → image content was right → winner="image"
-            winner = "caption" if label == 1 else "image"
+            paper_id = str(metadata[i].get("image_id", i))
+            ts = _dt.datetime.now(_dt.timezone.utc).isoformat()
 
-            event = ResearchDHardEvent(
-                paper_id     = metadata[i].get("image_id", str(i)),
-                failure_class= "compositionality_gap",
-                v_claims     = z_img.cpu().numpy().tolist(),
-                v_reviews    = z_cap.cpu().numpy().tolist(),
-                divergence   = result.divergence,
-                winner       = winner,
-                resolved     = True,
+            queue.log(
+                paper_id        = paper_id,
+                venue           = "COCO2017",
+                routing_decision= result.decision,
+                decision_basis  = result.divergence,
+                conf_claims     = result.conf_claims,
+                conf_reviews    = result.conf_reviews,
+                v_claims        = z_img.cpu().numpy().tolist(),
+                v_reviews       = z_cap.cpu().numpy().tolist(),
+                failure_class   = result.failure_class,
+                timestamp       = ts,
             )
-            queue.append(event)
+
+            # Winner: label=1 (matched) → caption was right → winner="claims"
+            #         label=0 (mismatched) → image was right → winner="reviews"
+            verdicts[paper_id] = {
+                "decision":  "Accept" if label == 1 else "Reject",
+                "avg_score": 7.0      if label == 1 else 3.0,
+                "winner":    "claims" if label == 1 else "reviews",
+            }
             n_dhard += 1
 
-    log.info(f"D_hard: {n_dhard} events logged → {dhard_path}")
+    queue.attach_verdicts(verdicts)
+    log.info(f"D_hard: {n_dhard} events logged, {len(queue.resolved())} resolved → {dhard_path}")
 
     dmn   = ResearchDMN(queue_path=str(dhard_path), adapter_dir=str(adapter_dir))
     built = dmn.consolidate(lambda_iso=lambda_iso, verbose=True)
