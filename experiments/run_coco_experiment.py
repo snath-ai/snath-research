@@ -670,7 +670,6 @@ def run_full_experiment(
     enc_cap = CLIPTextEncoder(embed_dim=embed_dim,  device=device)
     router  = DivergenceRouter(
         tau_low=TAU_LOW, tau_high=TAU_HIGH, delta=DELTA,
-        embed_dim=embed_dim,
     )
 
     # ── Load embeddings ───────────────────────────────────────────────────────
