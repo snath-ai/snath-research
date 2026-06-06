@@ -305,11 +305,11 @@ def run(args):
         _pca = _PCA(n_components=_n_comp)
         _pca.fit(_diffs)
         # PCA components are unit vectors; inputs are L2-normalised so each
-        # z_i = cos(θ) ∈ [-1, 1]. Those tiny values → flat softmax → confidence
-        # never crosses tau_low → TRIGGER_REPLAN = 0%.
-        # Scale = 7 puts moderate-disagreement papers (|cos θ| ≈ 0.2) at
-        # z_max ≈ 1.4 → softmax_max ≈ 0.37 → confidence ≈ 0.28 > tau_low. ✓
-        _ROUTING_SCALE = 7.0
+        # z_i = cos(θ). PCA-of-difference directions are roughly perpendicular
+        # to individual embedding directions, so max |cos θ| ≈ 0.07-0.12 for
+        # most papers. For confidence > tau_low=0.25 we need z_max > 1.30:
+        #   scale = 1.30 / 0.10 = 13 → use 20 to cover both streams reliably.
+        _ROUTING_SCALE = 20.0
         _components = torch.tensor(_pca.components_, dtype=torch.float32) * _ROUTING_SCALE
         with torch.no_grad():
             enc_claims.proj.weight.data  = _components.clone()
@@ -389,6 +389,8 @@ def run(args):
             "paper_id":    p.paper_id,
             "decision":    result.decision.value,
             "divergence":  result.divergence,
+            "conf_claims": result.conf_claims,
+            "conf_reviews": result.conf_reviews,
             "label":       label,
             "winner":      winner,
             "or_decision": p.decision,
@@ -398,6 +400,27 @@ def run(args):
             log.info(f"  Encoded {i+1}/{len(papers)} papers...")
 
     log.info(f"Encoded {len(paper_results)} papers.")
+
+    # ── 3b. Calibration diagnostics ──────────────────────────────────────
+    if paper_results:
+        import numpy as _np
+        _conf_a = [r["conf_claims"]  for r in paper_results]
+        _conf_b = [r["conf_reviews"] for r in paper_results]
+        _divs   = [r["divergence"]   for r in paper_results]
+        _decs   = [r["decision"]     for r in paper_results]
+        log.info(f"\n--- routing calibration ---")
+        log.info(f"  conf_claims p25/p50/p75/max: "
+                 f"{_np.percentile(_conf_a,25):.3f} / {_np.percentile(_conf_a,50):.3f} / "
+                 f"{_np.percentile(_conf_a,75):.3f} / {max(_conf_a):.3f}")
+        log.info(f"  conf_reviews p25/p50/p75/max: "
+                 f"{_np.percentile(_conf_b,25):.3f} / {_np.percentile(_conf_b,50):.3f} / "
+                 f"{_np.percentile(_conf_b,75):.3f} / {max(_conf_b):.3f}")
+        log.info(f"  D (L1/√G)   p25/p50/p75/max: "
+                 f"{_np.percentile(_divs,25):.3f} / {_np.percentile(_divs,50):.3f} / "
+                 f"{_np.percentile(_divs,75):.3f} / {max(_divs):.3f}")
+        log.info(f"  decisions: { {d: _decs.count(d) for d in set(_decs)} }")
+        log.info(f"  tau_low={router.tau_low}  tau_high={router.tau_high}  delta={router.delta}")
+        log.info(f"---")
 
     # ── 4. BEFORE metrics ─────────────────────────────────────────────────
     d_scores = [r["divergence"] for r in paper_results]
