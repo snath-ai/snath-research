@@ -268,6 +268,44 @@ def run(args):
                 log.info(f"  BERT encoded {i+1}/{len(papers)} papers...")
         log.info(f"  Done. {len(bert_cache_claims)} papers cached.")
 
+    # ── 2b. PCA initialisation of concept projection ──────────────────────
+    #
+    # Random N(0,0.1) init projects claims and reviews to arbitrary directions
+    # in 8-dim space — the resulting D is anti-correlated with rejection
+    # (AUROC < 0.5) because it captures stylistic differences (abstract style
+    # vs. review style) rather than semantic claim/evidence gaps.
+    #
+    # Fix: fit PCA on the (claims_bert − reviews_bert) difference vectors.
+    # These 8 components span the natural disagreement manifold — the axes
+    # along which abstracts and reviews diverge in SciBERT space. Initialising
+    # both projection heads with these components means:
+    #   • D ≈ 0  for papers where abstract and reviews discuss similar content
+    #   • D > 0  for papers where claims diverge from evidence
+    # This gives AUROC > 0.5 without label supervision, providing a real signal
+    # for SIGReg to improve upon (AIA Experiment 3: ρ = AUROC_SIGReg / AUROC_baseline).
+    _first_cached_check = next(iter(bert_cache_claims.values()), None)
+    _is_bert_dim = (_first_cached_check is not None and
+                    _first_cached_check.shape[-1] != enc_claims.embed_dim)
+
+    if _is_bert_dim and bert_cache_claims:
+        from sklearn.decomposition import PCA as _PCA
+        _valid_pca = [p.paper_id for p in papers
+                      if p.paper_id in bert_cache_claims and p.paper_id in bert_cache_reviews]
+        _diffs = torch.stack(
+            [bert_cache_claims[pid] - bert_cache_reviews[pid] for pid in _valid_pca]
+        ).numpy()                                          # (N, 768)
+        _n_comp = min(enc_claims.embed_dim, len(_valid_pca) - 1)
+        _pca = _PCA(n_components=_n_comp)
+        _pca.fit(_diffs)
+        _components = torch.tensor(_pca.components_, dtype=torch.float32)  # (8, 768)
+        with torch.no_grad():
+            enc_claims.proj.weight.data  = _components.clone()
+            enc_claims.proj.bias.data.zero_()
+            enc_reviews.proj.weight.data = _components.clone()
+            enc_reviews.proj.bias.data.zero_()
+        log.info(f"\nPCA projection init ({_n_comp} components, "
+                 f"explained_var={_pca.explained_variance_ratio_.sum():.3f})")
+
     # ── 2c. Projection fine-tuning with SIGReg (--train-projection) ──────
     #
     # "Signal should be accurate in the first place." — applying SIGReg to
