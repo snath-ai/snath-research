@@ -46,6 +46,7 @@ import logging
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 # Limit PyTorch's internal thread pool to 1. This is separate from the
 # OMP/MKL env vars above — torch.set_num_threads() controls the ATen
 # thread pool which is what actually triggers the mutex.cc race on M1.
