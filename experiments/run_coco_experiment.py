@@ -55,6 +55,7 @@ from divergence_router           import DivergenceRouter
 from dhard                       import DHardQueue, ResearchDHardEvent
 from dmn.research_dmn            import ResearchDMN
 from dmn.sigreg                  import SIGRegLoss
+from models.jepa_predictor       import JEPAPredictor, train_predictor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
@@ -457,6 +458,77 @@ def run_infonce_sigreg(
 
 
 # ==============================================================================
+# CELL 6.5 — JEPA predictor (world model, label-free)
+# ==============================================================================
+
+def run_jepa_predictor(
+    enc_img:    CLIPImageEncoder,
+    enc_cap:    CLIPTextEncoder,
+    img_embs:   torch.Tensor,
+    cap_embs:   torch.Tensor,
+    oracle_img: torch.Tensor,
+    oracle_cap: torch.Tensor,
+    labels:     np.ndarray,
+    n_epochs:   int   = 200,
+    lr:         float = 1e-3,
+    batch_size: int   = 128,
+) -> Tuple[dict, np.ndarray]:
+    """
+    Train a JEPA predictor and compute label-free prediction error AUROC.
+
+    The predictor learns: z_img (concept) → ẑ_cap (concept).
+    Supervision: prediction error = 1 - cos(ẑ_cap, sg(z_cap)).
+    No labels used at any point.
+
+    After training, prediction error is computed for every oracle pair.
+    High error → internally inconsistent (image and caption concepts diverge).
+    AUROC measures how well prediction error distinguishes mismatch from match.
+
+    Returns:
+        train_stats: dict from train_predictor (error_before, error_after, loss_final)
+        pred_errors: (N,) np.ndarray of per-pair prediction errors (for AUROC)
+    """
+    from sklearn.metrics import roc_auc_score
+
+    log.info("=== JEPA predictor training (label-free world model) ===")
+    embed_dim = enc_img.embed_dim
+    device    = enc_img.device
+
+    predictor = JEPAPredictor(embed_dim=embed_dim).to(device)
+
+    # Compute concept-space training pairs (all COCO pairs, not just oracle)
+    enc_img.eval()
+    enc_cap.eval()
+    with torch.no_grad():
+        z_train_img = enc_img(img_embs.to(device)).cpu()
+        z_train_cap = enc_cap(cap_embs.to(device)).cpu()
+
+    train_stats = train_predictor(
+        predictor, z_train_img, z_train_cap,
+        n_epochs=n_epochs, lr=lr, batch_size=batch_size,
+    )
+
+    # Compute prediction error on oracle pairs (no labels used)
+    predictor.eval()
+    pred_errors = []
+    with torch.no_grad():
+        for i in range(0, len(labels), batch_size):
+            z_img_b = enc_img(oracle_img[i : i + batch_size].to(device))
+            z_cap_b = enc_cap(oracle_cap[i : i + batch_size].to(device))
+            err     = predictor.prediction_error(z_img_b, z_cap_b)
+            pred_errors.append(err.cpu())
+    pred_errors = torch.cat(pred_errors).numpy()
+
+    # AUROC: high prediction error → likely mismatch (label=0)
+    auroc_pred = roc_auc_score(1 - labels, pred_errors)
+    log.info(f"  Predictor AUROC (label-free): {auroc_pred:.4f}  "
+             f"(mean error: {pred_errors.mean():.4f})")
+
+    train_stats["auroc"] = auroc_pred
+    return train_stats, pred_errors
+
+
+# ==============================================================================
 # CELL 7 — D_hard mining + DMN consolidation
 # ==============================================================================
 
@@ -762,6 +834,15 @@ def run_full_experiment(
     )
     log.info(f"  AUROC SIGReg: {auroc_sigreg:.4f}  TRIGGER_REPLAN: {trig_sigreg:.1%}")
 
+    # ── JEPA predictor (label-free world model) ───────────────────────────────
+    jepa_epochs = 50 if smoke_test else 200
+    jepa_stats, pred_errors = run_jepa_predictor(
+        enc_img, enc_cap, img_embs, cap_embs,
+        oracle_img, oracle_cap, oracle_labels,
+        n_epochs=jepa_epochs,
+    )
+    auroc_predictor = jepa_stats["auroc"]
+
     # ── D_hard mining + DMN ───────────────────────────────────────────────────
     log.info("=== D_hard mining + DMN consolidation ===")
     built = mine_dhard_and_consolidate(
@@ -813,6 +894,7 @@ def run_full_experiment(
     print(f"  AUROC before:     {auroc_before:.4f}")
     print(f"  AUROC SIGReg:     {auroc_sigreg:.4f}   ρ = {rho:.4f}")
     print(f"  AUROC after LoRA: {auroc_after:.4f}   ρ_LoRA = {rho_lora:.4f}")
+    print(f"  AUROC predictor:  {auroc_predictor:.4f}   [label-free JEPA]")
     print(f"  TRIGGER_REPLAN:   {trig_sigreg:.1%}")
     print(f"  Adapters built:   {len(built)}")
     if wg_results:
@@ -834,6 +916,8 @@ def run_full_experiment(
         "auroc_before":      auroc_before,
         "auroc_sigreg":      auroc_sigreg,
         "auroc_after_lora":  auroc_after,
+        "auroc_predictor":   auroc_predictor,
+        "jepa_predictor":    jepa_stats,
         "rho":               rho,
         "rho_lora":          rho_lora,
         "trigger_rate":      trig_sigreg,
