@@ -674,13 +674,21 @@ def run_full_experiment(
     # ── Load or synthesise embeddings ─────────────────────────────────────────
     ann_file = DATA_DIR / "annotations" / "captions_train2017.json"
     if smoke_test and not ann_file.exists():
-        # No COCO download needed — generate random 512-dim embeddings that
-        # mimic the CLIP distribution (L2-normalised Gaussian).
-        N = 200
-        log.info(f"Smoke test: generating {N} synthetic CLIP pairs (no COCO required)...")
+        # No COCO download needed — generate synthetic CLIP-like pairs.
+        # Use embed_dim=8 here regardless of the CLI flag: PCA at 80 dims
+        # with random data can't produce peaked enough softmax distributions
+        # to fire TRIGGER_REPLAN (tau_low=0.25 requires scale>>20 at 80 dims).
+        # 8 dims with scale=20 is validated from the ICLR pilot.
+        embed_dim = 8
+        enc_img = CLIPImageEncoder(embed_dim=embed_dim, device=device)
+        enc_cap = CLIPTextEncoder(embed_dim=embed_dim,  device=device)
+        N = 400
+        log.info(f"Smoke test: generating {N} synthetic CLIP pairs "
+                 f"(embed_dim forced to 8 for signal, no COCO required)...")
         torch.manual_seed(42)
         img_embs = F.normalize(torch.randn(N, 512), dim=-1)
-        # Captions: matched half ≈ image + small noise, mismatched half = random
+        # Matched pairs: caption ≈ image + small noise (low D expected)
+        # Mismatched pairs: caption = random (high D expected)
         matched    = F.normalize(img_embs[:N//2] + 0.3 * torch.randn(N//2, 512), dim=-1)
         mismatched = F.normalize(torch.randn(N//2, 512), dim=-1)
         cap_embs   = torch.cat([matched, mismatched], dim=0)
