@@ -291,9 +291,15 @@ def run(args):
         from sklearn.decomposition import PCA as _PCA
         _valid_pca = [p.paper_id for p in papers
                       if p.paper_id in bert_cache_claims and p.paper_id in bert_cache_reviews]
-        _diffs = torch.stack(
-            [bert_cache_claims[pid] - bert_cache_reviews[pid] for pid in _valid_pca]
-        ).numpy()                                          # (N, 768)
+        # L2-normalise before differencing: removes magnitude effects so PCA
+        # captures DIRECTIONAL disagreement (semantic angle) not volume differences.
+        # Strong accepted papers have large-magnitude embeddings on both sides,
+        # inflating raw diffs and inverting the AUROC signal.
+        _c = torch.stack([bert_cache_claims[pid]  for pid in _valid_pca])
+        _r = torch.stack([bert_cache_reviews[pid] for pid in _valid_pca])
+        _c = F.normalize(_c, dim=-1)
+        _r = F.normalize(_r, dim=-1)
+        _diffs = (_c - _r).numpy()                         # (N, 768), unit-norm rows
         _n_comp = min(enc_claims.embed_dim, len(_valid_pca) - 1)
         _pca = _PCA(n_components=_n_comp)
         _pca.fit(_diffs)

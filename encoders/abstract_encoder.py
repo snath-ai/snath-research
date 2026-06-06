@@ -271,6 +271,6 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         Args:
             raw_embedding: (B, 768) pre-computed SciBERT mean-pool output.
         Returns:
-            z: (B, embed_dim) normalised projection.
+            z: (B, embed_dim) concept projection.
         """
-        return self.proj(raw_embedding)
+        return self.proj(F.normalize(raw_embedding, dim=-1))

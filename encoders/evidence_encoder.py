@@ -240,4 +240,4 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
     # ------------------------------------------------------------------
 
     def forward(self, raw_embedding: torch.Tensor) -> torch.Tensor:
-        return self.proj(raw_embedding)
+        return self.proj(F.normalize(raw_embedding, dim=-1))
