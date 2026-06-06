@@ -662,7 +662,6 @@ def run_full_experiment(
     """
     device = _resolve_device(device)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    max_pairs = 200 if smoke_test else None
 
     # ── Init encoders ─────────────────────────────────────────────────────────
     log.info(f"Initialising CLIP encoders (embed_dim={embed_dim}, device={device})...")
@@ -672,14 +671,30 @@ def run_full_experiment(
         tau_low=TAU_LOW, tau_high=TAU_HIGH, delta=DELTA,
     )
 
-    # ── Load embeddings ───────────────────────────────────────────────────────
-    img_embs, cap_embs, metadata = precompute_coco_embeddings(
-        max_pairs=max_pairs, device=device,
-    )
-    log.info(f"Loaded {len(metadata)} COCO pairs.")
+    # ── Load or synthesise embeddings ─────────────────────────────────────────
+    ann_file = DATA_DIR / "annotations" / "captions_train2017.json"
+    if smoke_test and not ann_file.exists():
+        # No COCO download needed — generate random 512-dim embeddings that
+        # mimic the CLIP distribution (L2-normalised Gaussian).
+        N = 200
+        log.info(f"Smoke test: generating {N} synthetic CLIP pairs (no COCO required)...")
+        torch.manual_seed(42)
+        img_embs = F.normalize(torch.randn(N, 512), dim=-1)
+        # Captions: matched half ≈ image + small noise, mismatched half = random
+        matched    = F.normalize(img_embs[:N//2] + 0.3 * torch.randn(N//2, 512), dim=-1)
+        mismatched = F.normalize(torch.randn(N//2, 512), dim=-1)
+        cap_embs   = torch.cat([matched, mismatched], dim=0)
+        metadata   = [{"image_id": i, "caption": f"synthetic_{i}",
+                        "image_path": ""} for i in range(N)]
+    else:
+        max_pairs = 200 if smoke_test else None
+        img_embs, cap_embs, metadata = precompute_coco_embeddings(
+            max_pairs=max_pairs, device=device,
+        )
+    log.info(f"Loaded {len(metadata)} pairs.")
 
     # ── Concept projection init ───────────────────────────────────────────────
-    if use_vocab_init and embed_dim == 80:
+    if use_vocab_init and embed_dim == 80 and not smoke_test:
         log.info("Initialising concept projection with COCO vocabulary (τ=100)...")
         enc_img.init_concept_vocabulary(freeze=False)
         enc_cap.init_concept_vocabulary(freeze=False)
