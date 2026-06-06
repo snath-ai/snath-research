@@ -621,14 +621,31 @@ def evaluate_winoground(
 # CELL 9 — Full experiment runner
 # ==============================================================================
 
+def _resolve_device(requested: Optional[str]) -> str:
+    """Auto-detect the best available device, with a clear error if CUDA is requested but absent."""
+    if requested is None or requested == "auto":
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "cpu"   # MPS multi-instance deadlock
+        return "cpu"
+    if requested == "cuda" and not torch.cuda.is_available():
+        log.warning(
+            "CUDA requested but not available. Falling back to CPU.\n"
+            "  In Colab: Runtime → Change runtime type → T4 GPU, then reconnect."
+        )
+        return "cpu"
+    return requested
+
+
 def run_full_experiment(
-    smoke_test:  bool  = False,
-    lambda_iso:  float = 0.1,
-    embed_dim:   int   = 80,
-    use_vocab_init: bool = True,
-    device:      str   = "cuda",
-    sigreg_epochs: int = 300,
-    infonce_epochs: int = 2,
+    smoke_test:     bool  = False,
+    lambda_iso:     float = 0.1,
+    embed_dim:      int   = 80,
+    use_vocab_init: bool  = True,
+    device:         Optional[str] = None,
+    sigreg_epochs:  int   = 300,
+    infonce_epochs: int   = 2,
 ) -> dict:
     """
     Run the complete AIA Experiment 3 pipeline.
@@ -639,10 +656,11 @@ def run_full_experiment(
         embed_dim:   Concept space dimension.
         use_vocab_init: Use COCO vocabulary init (requires embed_dim=80).
                         Otherwise uses PCA init (any embed_dim).
-        device:      "cuda", "mps", or "cpu".
+        device:      "cuda", "mps", "cpu", or None (auto-detect).
         sigreg_epochs:  Epochs for projection-only SIGReg fine-tuning.
         infonce_epochs: Epochs for InfoNCE + SIGReg continued training.
     """
+    device = _resolve_device(device)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     max_pairs = 200 if smoke_test else None
 
@@ -806,8 +824,8 @@ if __name__ == "__main__":
     parser.add_argument("--embed-dim",      type=int,   default=80)
     parser.add_argument("--no-vocab-init",  action="store_true",
                         help="Use PCA init instead of COCO vocabulary")
-    parser.add_argument("--device",         default="cuda",
-                        help="cuda / mps / cpu")
+    parser.add_argument("--device",         default=None,
+                        help="cuda / mps / cpu (default: auto-detect)")
     parser.add_argument("--sigreg-epochs",  type=int,   default=300)
     parser.add_argument("--infonce-epochs", type=int,   default=2)
     parser.add_argument("--download",       action="store_true",
