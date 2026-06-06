@@ -158,7 +158,6 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         raw = self._bert_encode(x)                          # (768,)
         with torch.no_grad():
             z = self.proj(raw.unsqueeze(0)).squeeze(0)      # (embed_dim,)
-            z = F.normalize(z, dim=0)
         return z.cpu().numpy()
 
     def get_confidence(self, z: np.ndarray) -> float:
@@ -273,4 +272,4 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         Returns:
             z: (B, embed_dim) normalised projection.
         """
-        return F.normalize(self.proj(raw_embedding), dim=-1)
+        return self.proj(raw_embedding)

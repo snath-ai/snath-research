@@ -153,7 +153,6 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
         raw = self._bert_encode(text)
         with torch.no_grad():
             z = self.proj(raw.unsqueeze(0)).squeeze(0)
-            z = F.normalize(z, dim=0)
         return z.cpu().numpy()
 
     def get_confidence(self, z: np.ndarray) -> float:
@@ -244,4 +243,4 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
     # ------------------------------------------------------------------
 
     def forward(self, raw_embedding: torch.Tensor) -> torch.Tensor:
-        return F.normalize(self.proj(raw_embedding), dim=-1)
+        return self.proj(raw_embedding)
