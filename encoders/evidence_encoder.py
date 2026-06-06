@@ -93,6 +93,9 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
         nn.init.zeros_(self.proj.bias)
         self.proj.to(self.device)
 
+        self._lora_A: Optional[torch.Tensor] = None
+        self._lora_B: Optional[torch.Tensor] = None
+
     def _load_backbone(self):
         if self._backbone is None:
             from transformers import AutoTokenizer, AutoModel
@@ -169,20 +172,15 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
 
     def load_lora(self, pt_path: str) -> None:
         """
-        Apply a signed LoRA delta to the projection layer.
+        Load a signed LoRA adapter for concept-space correction.
 
-        Typical use: when reviewers are consistently overconfident in their
-        negative assessments of a particular paper type (false negatives),
-        a learned correction adjusts the evidence encoder's projection.
-
-        Args:
-            pt_path: Path to the signed .pt adapter file.
+        Mirrors AbstractClaimsEncoder.load_lora — stores A,B for application
+        in forward() as  z + (z @ A) @ B, matching the DMN training objective.
         """
         payload = torch.load(pt_path, map_location="cpu", weights_only=False)
-        A = payload["A"].to(self.device)
-        B = payload["B"].to(self.device)
         with torch.no_grad():
-            self.proj.weight.data += (A @ B)
+            self._lora_A = payload["A"].to(self.device)
+            self._lora_B = payload["B"].to(self.device)
 
     # ------------------------------------------------------------------
     # SIGReg projection fine-tuning (AIA Experiment 3)
@@ -240,4 +238,7 @@ class EvidenceEncoder(AbstractModalEncoder, nn.Module):
     # ------------------------------------------------------------------
 
     def forward(self, raw_embedding: torch.Tensor) -> torch.Tensor:
-        return self.proj(F.normalize(raw_embedding, dim=-1))
+        z = self.proj(F.normalize(raw_embedding, dim=-1))
+        if self._lora_A is not None:
+            z = z + torch.matmul(torch.matmul(z, self._lora_A), self._lora_B)
+        return z

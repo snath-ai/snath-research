@@ -112,6 +112,13 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         nn.init.zeros_(self.proj.bias)
         self.proj.to(self.device)
 
+        # LoRA adapter (concept space). Set by load_lora(); None until loaded.
+        # Stored as separate A,B to apply as z + (z@A)@B — matching the
+        # training objective in ResearchDMN. NOT added to proj.weight (which
+        # is 8×768 and incompatible with the 8×8 A@B produced by DMN).
+        self._lora_A: Optional[torch.Tensor] = None
+        self._lora_B: Optional[torch.Tensor] = None
+
     def _load_backbone(self):
         """Lazy load SciBERT — only when encode() is first called."""
         if self._backbone is None:
@@ -182,20 +189,21 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
 
     def load_lora(self, pt_path: str) -> None:
         """
-        Apply a signed LoRA delta to the projection layer.
+        Load a signed LoRA adapter for concept-space correction.
 
-        The delta encodes a learned correction for a specific claims-failure
-        mode (e.g., scope_overclaim at NeurIPS-style venues). Perishable —
-        gated by temporal trust W >= min_trust before injection.
+        The DMN trains A:(embed_dim,1) and B:(1,embed_dim) on 8-dim concept
+        vectors via  adapted = faulty + (faulty @ A) @ B. Storing A and B
+        here and applying them in forward() replicates that transformation
+        exactly. Adding A@B (8×8) to proj.weight (8×768) would be a shape
+        error and silently zero the effect.
 
         Args:
             pt_path: Path to the signed .pt adapter file.
         """
         payload = torch.load(pt_path, map_location="cpu", weights_only=False)
-        A = payload["A"].to(self.device)   # (embed_dim, rank)
-        B = payload["B"].to(self.device)   # (rank, embed_dim)
         with torch.no_grad():
-            self.proj.weight.data += (A @ B)
+            self._lora_A = payload["A"].to(self.device)  # (embed_dim, 1)
+            self._lora_B = payload["B"].to(self.device)  # (1, embed_dim)
 
     # ------------------------------------------------------------------
     # SIGReg projection fine-tuning (AIA Experiment 3)
@@ -271,6 +279,9 @@ class AbstractClaimsEncoder(AbstractModalEncoder, nn.Module):
         Args:
             raw_embedding: (B, 768) pre-computed SciBERT mean-pool output.
         Returns:
-            z: (B, embed_dim) concept projection.
+            z: (B, embed_dim) concept projection, with LoRA correction if loaded.
         """
-        return self.proj(F.normalize(raw_embedding, dim=-1))
+        z = self.proj(F.normalize(raw_embedding, dim=-1))
+        if self._lora_A is not None:
+            z = z + torch.matmul(torch.matmul(z, self._lora_A), self._lora_B)
+        return z
