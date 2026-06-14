@@ -44,6 +44,11 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.types import RouteDecision
 
+try:
+    from brain.abstract_adapter_router import AbstractAdapterRouter
+except ImportError:
+    from abc import ABC as AbstractAdapterRouter
+
 _ADAPTER_KEY = b"snath_research_adapter_sovereignty_2026"
 
 
@@ -112,7 +117,7 @@ def _decay_weight(created_at_iso: str | None, failure_class: str = "default") ->
         return 1.0
 
 
-class ResearchAdapterRouter:
+class ResearchAdapterRouter(AbstractAdapterRouter):
     """
     Two-pass adapter router for Snath Research.
 
