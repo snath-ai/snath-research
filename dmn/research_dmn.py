@@ -37,11 +37,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dhard import DHardQueue, ResearchDHardEvent
 from dmn.sigreg import SIGRegLoss
 
+try:
+    from brain.abstract_dmn import AbstractDMN
+except ImportError:
+    from abc import ABC as AbstractDMN
+
 _ADAPTER_KEY = b"snath_research_adapter_sovereignty_2026"
 _MIN_EVENTS  = 4
 
 
-class ResearchDMN:
+class ResearchDMN(AbstractDMN):
     """
     Default Mode Network for Snath Research.
 
@@ -184,6 +189,18 @@ class ResearchDMN:
                       f"loss={loss.item():.4f}")
 
         return built
+
+    def ingest(self, event) -> None:
+        self.queue.push(event)
+
+    def recall(self, query, **kwargs) -> dict:
+        path = self.adapter_dir / f"{query}.json"
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except Exception:
+                pass
+        return {}
 
     def stats(self) -> dict:
         return self.queue.stats()
